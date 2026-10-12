@@ -13,11 +13,21 @@
 
 </div>
 
-When Claude needs a password or a token, it asks for it with a tool. You type the value into a form above the prompt. The value goes to the login keychain, and Claude gets only the name.
+When Claude needs a password or a token, it asks for it with a tool. You type the value into a form above the prompt.
+
+```
+╔═[ WinFra GitLab personal access token ]═══════════════ NEW ═╗
+║ account : [_______________________________________________] ║
+║ token   : [_______________________________________________] ║
+╟─────────────────────────────────────────────────────────────╢
+║                    < Save >    < Cancel >                   ║
+╚═════════════════════════════════════════════════════════════╝
+```
+ The value goes to the login keychain, and Claude gets only the name.
 
 ## Features
 
-- **Form above the prompt**: an account field and one field per secret. Enter moves to the next field.
+- **Form above the prompt**: a retro dialog with a double frame, the purpose as its title, one line per field and `< Save >` `< Cancel >`. Enter moves to the next field.
 - **Keychain storage**: each secret is a generic password `kilo/<name>`. The value goes to `security` through stdin, never through argv.
 - **Index without values**: `list` reads names, accounts and comments from the keychain.
 - **Use without seeing**: `run` starts a command with the secrets as env vars and masks every value in the output.

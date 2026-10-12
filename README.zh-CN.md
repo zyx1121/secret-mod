@@ -12,7 +12,7 @@ Claude 需要密码或 token 时，用 tool 向你要。你在 prompt 上方的�
 
 ## 功能
 
-- **prompt 上方的表单**：账号栏加每个 secret 一栏，按 Enter 跳下一栏。
+- **prompt 上方的表单**：retro 双线对话框，标题是用途描述，每栏一行，按钮是 `< Save >` `< Cancel >`，按 Enter 跳下一栏。
 - **存进 keychain**：每个 secret 是一条 `kilo/<name>` generic password，值经 stdin 送给 `security`，不经 argv。
 - **不含值的索引**：`list` 从 keychain 读名称、账号与注释。
 - **用而不看**：`run` 把 secret 设成环境变量再执行命令，输出里的值全部遮掉。

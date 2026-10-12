@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
+import { cells, clipCells, envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -95,7 +95,7 @@ export const register: Register = on => {
         type: 'object',
         properties: {
           name: { type: 'string', description: 'System name, lowercase with hyphens, e.g. "gitlab-winfra"' },
-          purpose: { type: 'string', description: 'What it is for, how to reissue it, when it expires' },
+          purpose: { type: 'string', description: 'One plain sentence saying what this credential is, in the language Loki uses (e.g. "WinFra GitLab 的個人存取權杖"). It is the form title and the keychain comment. Do not repeat the name' },
           account: { type: 'boolean', description: 'Also ask for the login identity (email, username). Default true' },
           fields: {
             type: 'array',
@@ -248,35 +248,66 @@ export const register: Register = on => {
       else void submit()
     }
 
+    const width = Math.max(40, e.props.bodyColumns ?? 80)
+    const labelWidth = Math.max(...keys.map(k => k.length)) + 1
+    // ║ + space, label, ": [", field, "]", space + ║
+    const fieldWidth = Math.max(8, width - 4 - labelWidth - 4)
+    const tag = ` ${req.exists ? 'UPDATE' : 'NEW'}${list.length > 1 ? ` +${list.length - 1}` : ''} `
+    const room = width - 4 - tag.length - 5
+    const title = `[ ${clipCells(req.purpose || req.name, room)} ]`
+    const top = `╔═${title}${'═'.repeat(Math.max(1, width - 4 - cells(title) - tag.length))}${tag}═╗`
+    const rule = `╟${'─'.repeat(width - 2)}╢`
+    const bottom = `╚${'═'.repeat(width - 2)}╝`
+    const row = (key: string, child: unknown) => (
+      <Box key={key} flexDirection="row" width={width}>
+        <Text color="cyan">║ </Text>
+        <Box flexGrow={1}>{child}</Box>
+        <Text color="cyan"> ║</Text>
+      </Box>
+    )
+
+    // A retro dialog in the manner of DOS and dialog(1): double frame, title in
+    // the top edge, one line per field, < buttons >.
     return (
       <Box flexDirection="column">
-        <Text bold>
-          {PREFIX}
-          {req.name}
-          {req.exists ? '  (update)' : ''}
-          {list.length > 1 ? `  (+${list.length - 1} waiting)` : ''}
-        </Text>
-        {req.purpose ? <Text dimColor>{req.purpose}</Text> : null}
-        {keys.map((k, i) => (
-          <Input
-            key={k}
-            label={`${k}: `}
-            value={draft[k] ?? ''}
-            autoFocus={i === 0 ? true : undefined}
-            submitLabel={i < keys.length - 1 ? 'next' : 'save'}
-            onInput={(v: string) => {
-              draft[k] = v
-            }}
-            onSubmit={(v: string) => {
-              draft[k] = v
-              nextField(k)
-            }}
-          />
-        ))}
-        <Box flexDirection="row" gap={1}>
-          <Button key="save" label="Save" variant="primary" onPress={() => void submit()} />
-          <Button key="cancel" label="Cancel" onPress={() => void cancel()} />
-        </Box>
+        <Text color="cyan">{top}</Text>
+        {keys.map((k, i) =>
+          row(
+            `row-${k}`,
+            <Box flexDirection="row">
+              <Box width={labelWidth}>
+                <Text bold>{k}</Text>
+              </Box>
+              <Text>: [</Text>
+              <Box width={fieldWidth}>
+                <Input
+                  key={k}
+                  value={draft[k] ?? ''}
+                  placeholder={'_'.repeat(fieldWidth)}
+                  autoFocus={i === 0 ? true : undefined}
+                  submitLabel={i < keys.length - 1 ? 'next' : 'save'}
+                  onInput={(v: string) => {
+                    draft[k] = v
+                  }}
+                  onSubmit={(v: string) => {
+                    draft[k] = v
+                    nextField(k)
+                  }}
+                />
+              </Box>
+              <Text>]</Text>
+            </Box>,
+          ),
+        )}
+        <Text color="cyan">{rule}</Text>
+        {row(
+          'buttons',
+          <Box flexDirection="row" justifyContent="center" gap={4} flexGrow={1}>
+            <Button key="save" plain variant="primary" label="< Save >" onPress={() => void submit()} />
+            <Button key="cancel" plain label="< Cancel >" onPress={() => void cancel()} />
+          </Box>,
+        )}
+        <Text color="cyan">{bottom}</Text>
         {await next(e)}
       </Box>
     )
