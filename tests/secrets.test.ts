@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, keychainAttr, mask, toHex } from '../hooks/secrets'
+import { cells, clipCells, envFor, envPrefix, keychainAttr, mask, toHex } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -27,5 +27,12 @@ describe('secrets', () => {
     expect(keychainAttr('    "acct"<blob>="token"', 'acct')).toBe('token')
     expect(keychainAttr('    "icmt"<blob>=0x4F4BEFBC9B  "OK\\357\\274\\233"', 'icmt')).toBe('OK；')
     expect(keychainAttr('    "icmt"<blob>=<NULL>', 'icmt')).toBe('')
+  })
+
+  test('wide characters take 2 cells and titles clip to fit', async () => {
+    expect(cells('ab')).toBe(2)
+    expect(cells('框線 ok')).toBe(7)
+    expect(clipCells('框線預覽測試', 7)).toBe('框線預…')
+    expect(clipCells('short', 10)).toBe('short')
   })
 })
