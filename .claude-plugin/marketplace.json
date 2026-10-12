@@ -1,0 +1,17 @@
+{
+  "name": "secret-mod",
+  "owner": {
+    "name": "zyx1121",
+    "url": "https://github.com/zyx1121"
+  },
+  "description": "Marketplace for the secret-mod plugin: credentials in the macOS keychain that Claude uses without seeing.",
+  "plugins": [
+    {
+      "name": "secret-mod",
+      "source": "./",
+      "description": "Ask for credentials in a form above the prompt, keep them in the keychain, run commands with them masked.",
+      "category": "security",
+      "tags": ["keychain", "secrets", "macos", "function-hooks"]
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "name": "secret-mod",
+  "version": "0.1.0",
+  "description": "Ask for credentials in a form, keep them in the macOS keychain, and run commands with them without showing the values to Claude",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "zyx1121"
+  }
+}
