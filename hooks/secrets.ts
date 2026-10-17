@@ -43,17 +43,3 @@ export function keychainAttr(block: string, key: string): string {
   const bytes = new Uint8Array((m[1] ?? '').match(/../g)!.map(h => parseInt(h, 16)))
   return new TextDecoder().decode(bytes)
 }
-
-// Terminal cells of a string: East Asian wide characters and emoji take 2.
-const WIDE = /[\u1100-\u115F\u2E80-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u
-export const cells = (s: string) => Array.from(s).reduce((n, ch) => n + (WIDE.test(ch) ? 2 : 1), 0)
-
-export function clipCells(s: string, max: number): string {
-  if (cells(s) <= max) return s
-  let out = ''
-  for (const ch of Array.from(s)) {
-    if (cells(out + ch) > max - 1) break
-    out += ch
-  }
-  return out + '…'
-}

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { cells, clipCells, envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
+import { envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -248,42 +248,62 @@ export const register: Register = on => {
       else void submit()
     }
 
-    const width = Math.max(40, e.props.bodyColumns ?? 80)
+    // Other mods' bands may share this row, so the frame takes the width it is
+    // given: the edges are fixed, the runs of line between them stretch.
+    const span = Math.max(40, e.props.bodyColumns ?? 80)
     const labelWidth = Math.max(...keys.map(k => k.length)) + 1
-    // ║ + space, label, ": [", field, "]", space + ║
-    const fieldWidth = Math.max(8, width - 4 - labelWidth - 4)
     const tag = ` ${req.exists ? 'UPDATE' : 'NEW'}${list.length > 1 ? ` +${list.length - 1}` : ''} `
-    const room = width - 4 - tag.length - 5
-    const title = `[ ${clipCells(req.purpose || req.name, room)} ]`
-    const top = `╔═${title}${'═'.repeat(Math.max(1, width - 4 - cells(title) - tag.length))}${tag}═╗`
-    const rule = `╟${'─'.repeat(width - 2)}╢`
-    const bottom = `╚${'═'.repeat(width - 2)}╝`
+    const line = (ch: string) => (
+      <Box flexGrow={1} width={1} height={1} overflow="hidden">
+        <Text color="cyan">{ch.repeat(span)}</Text>
+      </Box>
+    )
+    const fixed = (s: string) => (
+      <Box flexShrink={0}>
+        <Text color="cyan">{s}</Text>
+      </Box>
+    )
+    const edge = (key: string, left: string, fill: string, right: string, middle?: unknown) => (
+      <Box key={key} flexDirection="row">
+        {fixed(left)}
+        {middle}
+        {line(fill)}
+        {fixed(right)}
+      </Box>
+    )
     const row = (key: string, child: unknown) => (
-      <Box key={key} flexDirection="row" width={width}>
-        <Text color="cyan">║ </Text>
-        <Box flexGrow={1}>{child}</Box>
-        <Text color="cyan"> ║</Text>
+      <Box key={key} flexDirection="row">
+        {fixed('║ ')}
+        <Box flexGrow={1} width={1}>
+          {child}
+        </Box>
+        {fixed(' ║')}
+      </Box>
+    )
+    const title = (
+      <Box flexShrink={1} minWidth={5}>
+        <Text color="cyan" wrap="truncate-end">{`[ ${req.purpose || req.name} ]`}</Text>
       </Box>
     )
 
     // A retro dialog in the manner of DOS and dialog(1): double frame, title in
     // the top edge, one line per field, < buttons >.
     return (
-      <Box flexDirection="column">
-        <Text color="cyan">{top}</Text>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        {edge('top', '╔═', '═', `${tag}═╗`, title)}
         {keys.map((k, i) =>
           row(
             `row-${k}`,
-            <Box flexDirection="row">
-              <Box width={labelWidth}>
+            <Box flexDirection="row" flexGrow={1}>
+              <Box width={labelWidth} flexShrink={0}>
                 <Text bold>{k}</Text>
               </Box>
               <Text>: [</Text>
-              <Box width={fieldWidth}>
+              <Box flexGrow={1} width={1} height={1} overflow="hidden">
                 <Input
                   key={k}
                   value={draft[k] ?? ''}
-                  placeholder={'_'.repeat(fieldWidth)}
+                  placeholder={'_'.repeat(span)}
                   autoFocus={i === 0 ? true : undefined}
                   submitLabel={i < keys.length - 1 ? 'next' : 'save'}
                   onInput={(v: string) => {
@@ -299,7 +319,7 @@ export const register: Register = on => {
             </Box>,
           ),
         )}
-        <Text color="cyan">{rule}</Text>
+        {edge('rule', '╟', '─', '╢')}
         {row(
           'buttons',
           <Box flexDirection="row" justifyContent="center" gap={4} flexGrow={1}>
@@ -307,7 +327,7 @@ export const register: Register = on => {
             <Button key="cancel" plain label="< Cancel >" onPress={() => void cancel()} />
           </Box>,
         )}
-        <Text color="cyan">{bottom}</Text>
+        {edge('bottom', '╚', '═', '╝')}
         {await next(e)}
       </Box>
     )
