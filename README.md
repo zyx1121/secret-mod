@@ -72,6 +72,8 @@ For the secret `nycu-portal`, `run` sets:
 
 ## Limits
 
+- Another PostToolUse hook later in the chain can rewrite a result after masking.
+- Non-secret fields (host, url, user, ...) are masked only inside `run`, not in other tool results. Base64 of a `user:token` pair is masked.
 - Masking stops the value itself, not what a command derives from it. A hash or a length still reaches Claude.
 - Outside `run`, values shorter than 8 characters are not masked, so common words stay readable.
 - A value you paste into the prompt yourself is not masked.
