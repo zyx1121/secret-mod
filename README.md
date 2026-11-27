@@ -31,7 +31,7 @@ When Claude needs a password or a token, it asks for it with a tool. You type th
 - **Keychain storage**: each secret is a generic password `kilo/<name>`. The value goes to `security` through stdin, never through argv.
 - **Index without values**: `list` reads names, accounts and comments from the keychain.
 - **Use without seeing**: `run` starts a command with the secrets as env vars and masks every value in the output.
-- **Guard every tool**: Bash cannot print a keychain value (`security find-generic-password -w`, `dump-keychain -d`, `security -i`). Any tool result that holds a `kilo/` value, raw or as base64, URL encoding, hex or a JSON string, is masked before Claude sees it, failed calls included.
+- **Guard every tool**: Bash cannot print a keychain value (`security find-generic-password -w`, `dump-keychain -d`, `security -i`). Any tool result that holds a `kilo/` value, raw or as base64, URL encoding, hex or a JSON string, is masked before Claude sees it, failed calls included. In a multi-field secret, the fields `host`, `hostname`, `domain`, `port`, `region`, `user`, `username`, `email` and `account` are masked only in `run` output.
 - **Update and delete**: `ask` with the same name updates an item and keeps its account. `delete` asks you first.
 
 ## Quick start

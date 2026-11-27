@@ -21,6 +21,15 @@ describe('secrets', () => {
     expect(envFor('db', JSON.stringify({ host: 'db.internal.example' }), '').DB_HOST).toBe('db.internal.example')
   })
 
+  test('url and endpoint fields stay in the global set', async () => {
+    const url = 'postgres://app:pw-1234567@db/x'
+    const endpoint = 'https://hooks.example.com/T000/B000/tok3n'
+    const v = globalValues('db', JSON.stringify({ url, endpoint, host: 'db.internal.example' }))
+    expect(v).toContain(url)
+    expect(v).toContain(endpoint)
+    expect(v).not.toContain('db.internal.example')
+  })
+
   test('values in output are masked at any length', async () => {
     const out = mask('token=s3cret-value id=abc s3cret-value', [{ name: 'demo', values: ['s3cret-value', 'abc'] }])
     expect(out).toBe('token=[kilo/demo] id=[kilo/demo] [kilo/demo]')

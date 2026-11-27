@@ -62,9 +62,11 @@ export function variants(v: string): string[] {
 // every tool result would wreck ordinary output.
 export const MIN_GLOBAL = 8
 
-// Field names that hold no secret (a host, a region). They are masked inside
-// `run` output but kept out of the global set that covers other tools.
-export const NON_SECRET_FIELDS = ['host', 'hostname', 'url', 'endpoint', 'domain', 'port', 'region', 'user', 'username', 'email', 'account']
+// Field names that hold no secret (a host, a region). `url` and `endpoint` are
+// left out on purpose: a DSN, webhook or presigned link carries a credential.
+// These fields are masked inside `run` output but kept out of the global set
+// that covers other tools.
+export const NON_SECRET_FIELDS = ['host', 'hostname', 'domain', 'port', 'region', 'user', 'username', 'email', 'account']
 
 export const isNonSecretField = (field: string) => NON_SECRET_FIELDS.includes(field.toLowerCase())
 
