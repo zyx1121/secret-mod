@@ -99,9 +99,10 @@ export function maskDeep(value: unknown, secrets: { name: string; values: string
 // commit message is one word and never a command.
 type Cmd = string[]
 
-function parse(src: string): { cmds: Cmd[]; subs: string[] } {
+function parse(src: string): { cmds: Cmd[]; subs: string[]; bodies: { cmd: Cmd; body: string }[] } {
   const cmds: Cmd[] = []
   const subs: string[] = []
+  const bodies: { cmd: Cmd; body: string }[] = []
   let cmd: Cmd = []
   let word = ''
   let inWord = false
@@ -115,14 +116,14 @@ function parse(src: string): { cmds: Cmd[]; subs: string[] } {
     if (cmd.length) cmds.push(cmd)
     cmd = []
   }
-  const heredocs: string[] = []
+  const heredocs: { tag: string; cmd: Cmd }[] = []
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!
     // A heredoc body is data, not commands: skip it up to its delimiter line.
     if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
       const m = src.slice(i + 2).match(/^-?\s*(['"]?)([A-Za-z0-9_]+)\1/)
       if (m) {
-        heredocs.push(m[2]!)
+        heredocs.push({ tag: m[2]!, cmd })
         i += 1 + m[0].length
         continue
       }
@@ -130,9 +131,10 @@ function parse(src: string): { cmds: Cmd[]; subs: string[] } {
     if (c === '\n' && heredocs.length) {
       endCmd()
       let at = i + 1
-      for (const tag of heredocs.splice(0)) {
+      for (const { tag, cmd: owner } of heredocs.splice(0)) {
         const lines = src.slice(at).split('\n')
         const k = lines.findIndex(l => l.trim() === tag)
+        bodies.push({ cmd: owner, body: (k < 0 ? lines : lines.slice(0, k)).join('\n') })
         at += k < 0 ? src.length : lines.slice(0, k + 1).join('\n').length + 1
       }
       i = Math.min(at, src.length) - 1
@@ -176,7 +178,7 @@ function parse(src: string): { cmds: Cmd[]; subs: string[] } {
     }
   }
   endCmd()
-  return { cmds, subs }
+  return { cmds, subs, bodies }
 }
 
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
@@ -209,6 +211,11 @@ function cmdReads(words: Cmd, depth: number): boolean {
 
 export function readsKeychain(command: string, depth = 0): boolean {
   if (depth > 4) return true
-  const { cmds, subs } = parse(command)
-  return cmds.some(c => cmdReads(c, depth)) || subs.some(s => readsKeychain(s, depth + 1))
+  const { cmds, subs, bodies } = parse(command)
+  return (
+    cmds.some(c => cmdReads(c, depth)) ||
+    subs.some(s => readsKeychain(s, depth + 1)) ||
+    // A heredoc is data unless its consumer is a shell, which runs it.
+    bodies.some(b => b.cmd.some(w => SHELLS.has(base(w))) && readsKeychain(b.body, depth + 1))
+  )
 }
