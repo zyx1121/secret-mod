@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, keychainAttr, mask, toHex } from '../hooks/secrets'
+import { envFor, envPrefix, keychainAttr, mask, maskDeep, readsKeychain, toHex, variants } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -27,5 +27,37 @@ describe('secrets', () => {
     expect(keychainAttr('    "acct"<blob>="token"', 'acct')).toBe('token')
     expect(keychainAttr('    "icmt"<blob>=0x4F4BEFBC9B  "OK\\357\\274\\233"', 'icmt')).toBe('OK；')
     expect(keychainAttr('    "icmt"<blob>=<NULL>', 'icmt')).toBe('')
+  })
+
+  test('variants cover base64, URL and hex', async () => {
+    const v = variants('p@ss/word+1')
+    expect(v).toContain('p@ss/word+1')
+    expect(v).toContain(btoa('p@ss/word+1').replace(/=+$/, ''))
+    expect(v).toContain(btoa('p@ss/word+1\n').replace(/=+$/, ''))
+    expect(v).toContain(encodeURIComponent('p@ss/word+1'))
+    expect(v).toContain(toHex('p@ss/word+1'))
+  })
+
+  test('maskDeep masks nested strings and reports no match', async () => {
+    const s = [{ name: 'demo', values: ['s3cret-value'] }]
+    expect(maskDeep({ stdout: 'x s3cret-value', n: 1, a: ['s3cret-value'] }, s)).toEqual({ stdout: 'x [kilo/demo]', n: 1, a: ['[kilo/demo]'] })
+    expect(maskDeep({ stdout: 'clean' }, s)).toBe(undefined)
+  })
+
+  test('commands that print keychain values are caught', async () => {
+    for (const c of [
+      'security find-generic-password -s kilo/x -w',
+      'TOKEN=$(security find-generic-password -s kilo/x -w) curl -H "a: $TOKEN" x',
+      'cd /tmp && /usr/bin/security find-internet-password -gs host',
+      'security dump-keychain -d login.keychain',
+      'echo "find-generic-password -s kilo/x -w" | security -i',
+      'security export -k login.keychain',
+    ]) expect(readsKeychain(c)).toBe(true)
+    for (const c of [
+      'security find-generic-password -s kilo/x',
+      'security dump-keychain | grep svce',
+      'security add-generic-password -U -s kilo/x -a me -w',
+      'git log --grep security',
+    ]) expect(readsKeychain(c)).toBe(false)
   })
 })

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
+import { envFor, envPrefix, FIELD, keychainAttr, mask, maskDeep, metaKey, MIN_GLOBAL, PREFIX, readsKeychain, toHex, variants } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -45,6 +45,38 @@ async function readAccount($: any, name: string): Promise<string> {
   return keychainAttr(r.stdout, 'acct')
 }
 
+// Every kilo/ value with its encodings, for masking other tools' results.
+type Known = { name: string; values: string[] }[]
+let known: Known = []
+let loading: Promise<void> | undefined
+
+async function loadKnown($: any): Promise<void> {
+  const items = await listItems($)
+  const found: Known = []
+  await Promise.all(
+    items.map(async it => {
+      const value = await readValue($, it.name)
+      if (value === undefined) return
+      const raw = Object.values(envFor(it.name, value, ''))
+      const values = [...new Set(raw.filter(v => v.length >= MIN_GLOBAL).flatMap(variants))]
+      if (values.length) found.push({ name: it.name, values })
+    }),
+  )
+  known = found
+}
+
+function ensureKnown($: any): Promise<void> {
+  loading ??= loadKnown($).catch(() => {
+    loading = undefined
+  })
+  return loading
+}
+
+const DENY =
+  'secret-mod: this command would print a keychain value into the conversation. ' +
+  'Use mcp__secret-mod__run with secrets ["<name>"] and read the value from its env var instead; ' +
+  'mcp__secret-mod__list shows the names. Reading attributes without -w or -g is fine.'
+
 async function save($: any, req: SecretRequest): Promise<string | undefined> {
   const draft = drafts[req.id] ?? {}
   const account = req.account ? (draft.account ?? '').trim() : 'token'
@@ -76,6 +108,9 @@ async function save($: any, req: SecretRequest): Promise<string | undefined> {
     updatedAt: new Date().toISOString(),
   }
   await $.store.set(metaKey(req.name), meta)
+  loading = loadKnown($).catch(() => {
+    loading = undefined
+  })
   return undefined
 }
 
@@ -87,6 +122,7 @@ async function finish($: any, req: SecretRequest, message: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    void ensureKnown($)
     await $.tool.register({
       name: 'ask',
       description:
@@ -190,6 +226,25 @@ export const register: Register = on => {
     return text(lines.join('\n'))
   }).catch(() => fail('secret-mod: listing the keychain failed.'))
 
+  // Bash cannot read values out of the keychain: the output would reach the model.
+  on('classic.PreToolUse', async ($, e: any, next) => {
+    if (e.tool === 'Bash' && typeof e.command === 'string' && readsKeychain(e.command)) return { deny: DENY }
+    return next(e)
+  })
+
+  // Any tool result that carries a kilo/ value, in any common encoding, is masked.
+  on('classic.PostToolUse', async ($, e: any, next) => {
+    const r: any = await next(e)
+    const tool = String(e.tool_name)
+    if (tool.startsWith('mcp__secret-mod__')) return r
+    await ensureKnown($)
+    const isMcp = tool.startsWith('mcp__')
+    const base = (isMcp ? r?.updatedMCPToolOutput : r?.updatedToolOutput) ?? e.tool_response
+    const masked = maskDeep(base, known)
+    if (masked === undefined) return r
+    return { ...r, [isMcp ? 'updatedMCPToolOutput' : 'updatedToolOutput']: masked }
+  })
+
   on('tool.call', { tool: 'mcp__secret-mod__run' }, async ($: any, e: any) => {
     const names: string[] = Array.isArray(e.secrets) ? e.secrets.map((s: unknown) => String(s).replace(/^kilo\//, '')) : []
     const env: Record<string, string> = {}
@@ -200,7 +255,8 @@ export const register: Register = on => {
       if (value === undefined) return fail(`No keychain item ${PREFIX}${name}. Use the ask tool first.`)
       const vars = envFor(name, value, await readAccount($, name))
       Object.assign(env, vars)
-      masks.push({ name, values: Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v) })
+      const raw = Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v)
+      masks.push({ name, values: raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])) })
     }
     const timeoutMs = Math.min(Math.max(Number(e.timeout_ms) || 120_000, 1_000), 600_000)
     let r

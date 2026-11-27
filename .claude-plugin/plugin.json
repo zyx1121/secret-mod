@@ -1,6 +1,6 @@
 {
   "name": "secret-mod",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Ask for credentials in a form, keep them in the macOS keychain, and run commands with them without showing the values to Claude",
   "types": "./types/index.d.ts",
   "author": {

@@ -31,6 +31,7 @@ When Claude needs a password or a token, it asks for it with a tool. You type th
 - **Keychain storage**: each secret is a generic password `kilo/<name>`. The value goes to `security` through stdin, never through argv.
 - **Index without values**: `list` reads names, accounts and comments from the keychain.
 - **Use without seeing**: `run` starts a command with the secrets as env vars and masks every value in the output.
+- **Guard every tool**: Bash cannot print a keychain value (`security find-generic-password -w`, `dump-keychain -d`, `security -i`). Any tool result that holds a `kilo/` value, raw or as base64, URL encoding or hex, is masked before Claude sees it.
 - **Update and delete**: `ask` with the same name updates an item and keeps its account. `delete` asks you first.
 
 ## Quick start
@@ -72,7 +73,8 @@ For the secret `nycu-portal`, `run` sets:
 ## Limits
 
 - Masking stops the value itself, not what a command derives from it. A hash or a length still reaches Claude.
-- Claude can still read the keychain with Bash (`security find-generic-password -w`). Add a deny rule in `settings.json` to block it.
+- Outside `run`, values shorter than 8 characters are not masked, so common words stay readable.
+- A value you paste into the prompt yourself is not masked.
 - The form shows what you type in plain text.
 - macOS only.
 

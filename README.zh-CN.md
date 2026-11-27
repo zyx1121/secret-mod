@@ -32,7 +32,9 @@ export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 ## 限制
 
 - 遮罩只挡值本身，挡不住由值算出的东西，例如哈希或长度。
-- Claude 仍可用 Bash 读 keychain，要挡就在 `settings.json` 加 deny 规则。
+- Bash 读 keychain 值的命令会被拦下；其他 tool 结果里的 `kilo/` 值（原文、base64、URL 编码、hex）都会遮掉。
+- `run` 以外，短于 8 字符的值不遮，避免常见字被误遮。
+- 你自己贴进对话的值不会遮。
 - 表单输入是明文显示。
 - 只支持 macOS。
 
