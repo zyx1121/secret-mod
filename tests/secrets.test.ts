@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, readsKeychain, toHex, variants } from '../hooks/secrets'
+import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, pairValues, readsKeychain, toHex, variants } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -52,6 +52,24 @@ describe('secrets', () => {
     expect(v).toContain(btoa('p@ss/word+1\n').replace(/=+$/, ''))
     expect(v).toContain(encodeURIComponent('p@ss/word+1'))
     expect(v).toContain(toHex('p@ss/word+1'))
+  })
+
+  test('base64 of user:token is masked', async () => {
+    const vals = pairValues('api', 'tok-123456789', 'alice', 8).flatMap(variants)
+    const s = [{ name: 'api', values: vals }]
+    const b = btoa('alice:tok-123456789')
+    for (const enc of [b.replace(/=+$/, ''), btoa('alice:tok-123456789\n').replace(/=+$/, ''), b.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')]) {
+      expect(mask(`Authorization: Basic ${enc}`, s)).toBe('Authorization: Basic [kilo/api]')
+      expect(maskDeep({ out: enc }, s)).toEqual({ out: '[kilo/api]' })
+    }
+  })
+
+  test('pairs of multi-field secrets use secret fields only', async () => {
+    const v = JSON.stringify({ host: 'db.internal.example', key: 'k-1234567', secret: 's-1234567' })
+    const p = pairValues('db', v, '', 8)
+    expect(p).toContain('k-1234567:s-1234567')
+    expect(p).toContain('s-1234567:k-1234567')
+    expect(p.some(x => x.includes('db.internal.example'))).toBe(false)
   })
 
   test('maskDeep masks nested strings and reports no match', async () => {

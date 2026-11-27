@@ -78,6 +78,20 @@ export function globalValues(name: string, value: string): string[] {
     .map(([, v]) => v)
 }
 
+// HTTP Basic style pairs `<account>:<secret>` and `<fieldA>:<fieldB>` (ordered,
+// secret fields only) whose encodings a command may print. Only secrets of at
+// least `minLen` chars take part. Hashes and lengths are not covered.
+export function pairValues(name: string, value: string, account: string, minLen = 0): string[] {
+  const p = envPrefix(name)
+  const env = envFor(name, value, '')
+  const secret = Object.entries(env).filter(([k, v]) => v.length >= minLen && !(k.startsWith(`${p}_`) && isNonSecretField(k.slice(p.length + 1))))
+  const out = new Set<string>()
+  if (account) for (const [, v] of secret) out.add(`${account}:${v}`)
+  const fields = secret.filter(([k]) => k !== p)
+  for (const [a, x] of fields) for (const [b, y] of fields) if (a !== b) out.add(`${x}:${y}`)
+  return [...out]
+}
+
 // Masks every string inside a tool result; returns undefined when nothing matched.
 export function maskDeep(value: unknown, secrets: { name: string; values: string[] }[]): unknown {
   let hit = false

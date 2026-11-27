@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, globalValues, keychainAttr, mask, maskDeep, metaKey, PREFIX, readsKeychain, toHex, variants } from './secrets'
+import { envFor, envPrefix, FIELD, globalValues, keychainAttr, MIN_GLOBAL, mask, maskDeep, metaKey, pairValues, PREFIX, readsKeychain, toHex, variants } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -70,7 +70,8 @@ async function loadKnown($: any): Promise<void> {
     }
     if (value === undefined) continue
     const set = values.get(it.name) ?? new Set<string>()
-    for (const v of globalValues(it.name, value)) for (const x of variants(v)) set.add(x)
+    const account = await readAccount($, it.name).catch(() => '')
+    for (const v of [...globalValues(it.name, value), ...pairValues(it.name, value, account, MIN_GLOBAL)]) for (const x of variants(v)) set.add(x)
     values.set(it.name, set)
     seen.set(it.name, it.modified)
   }
@@ -288,7 +289,8 @@ export const register: Register = on => {
       const vars = envFor(name, value, await readAccount($, name))
       Object.assign(env, vars)
       const raw = Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v)
-      masks.push({ name, values: raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])) })
+      const pairs = pairValues(name, value, vars[`${envPrefix(name)}_ACCOUNT`] ?? '', 4)
+      masks.push({ name, values: [...raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])), ...pairs.flatMap(variants)] })
     }
     if (readsKeychain(String(e.command)))
       return fail('secret-mod: do not read the keychain inside run. Pass the name in secrets and use its env var.')
