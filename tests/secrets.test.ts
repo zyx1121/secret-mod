@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, keychainAttr, mask, maskDeep, readsKeychain, toHex, variants } from '../hooks/secrets'
+import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, readsKeychain, toHex, variants } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -12,6 +12,13 @@ describe('secrets', () => {
     const env = envFor('smtp', JSON.stringify({ user: 'u1', password: 'pw-123' }), 'token')
     expect(env.SMTP_USER).toBe('u1')
     expect(env.SMTP_PASSWORD).toBe('pw-123')
+  })
+
+  test('non-secret fields stay out of the global set', async () => {
+    const v = globalValues('db', JSON.stringify({ host: 'db.internal.example', password: 'pw-1234567' }))
+    expect(v).toContain('pw-1234567')
+    expect(v).not.toContain('db.internal.example')
+    expect(envFor('db', JSON.stringify({ host: 'db.internal.example' }), '').DB_HOST).toBe('db.internal.example')
   })
 
   test('values in output are masked at any length', async () => {

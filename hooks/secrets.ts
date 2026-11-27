@@ -62,6 +62,20 @@ export function variants(v: string): string[] {
 // every tool result would wreck ordinary output.
 export const MIN_GLOBAL = 8
 
+// Field names that hold no secret (a host, a region). They are masked inside
+// `run` output but kept out of the global set that covers other tools.
+export const NON_SECRET_FIELDS = ['host', 'hostname', 'url', 'endpoint', 'domain', 'port', 'region', 'user', 'username', 'email', 'account']
+
+export const isNonSecretField = (field: string) => NON_SECRET_FIELDS.includes(field.toLowerCase())
+
+// Values of one item that are masked in every tool result.
+export function globalValues(name: string, value: string): string[] {
+  const p = envPrefix(name)
+  return Object.entries(envFor(name, value, ''))
+    .filter(([k, v]) => v.length >= MIN_GLOBAL && !(k.startsWith(`${p}_`) && isNonSecretField(k.slice(p.length + 1))))
+    .map(([, v]) => v)
+}
+
 // Masks every string inside a tool result; returns undefined when nothing matched.
 export function maskDeep(value: unknown, secrets: { name: string; values: string[] }[]): unknown {
   let hit = false
