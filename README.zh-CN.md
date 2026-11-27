@@ -31,6 +31,8 @@ export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 
 ## 限制
 
+- 链上较后面的其他 PostToolUse hook 可能在遮罩之后改写结果。
+- 非机密字段（host、url、user 等）只在 `run` 内遮罩，其他 tool 结果不遮。`user:token` 组合的 base64 会遮掉。
 - 遮罩只挡值本身，挡不住由值算出的东西，例如哈希或长度。
 - Bash 读 keychain 值的命令会被拦下；其他 tool 结果里的 `kilo/` 值（原文、base64、URL 编码、hex）都会遮掉。
 - `run` 以外，短于 8 字符的值不遮，避免常见字被误遮。
