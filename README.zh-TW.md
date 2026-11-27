@@ -50,6 +50,7 @@ export CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1
 - Bash 讀 keychain 值的指令會被擋下；其他 tool 結果裡的 `kilo/` 值（原文、base64、URL 編碼、hex）都會遮掉。
 - `run` 以外，短於 8 字元的值不遮，避免常見字被誤遮。
 - 你自己貼進對話的值不會遮。
+- 讀不到 keychain 時（上鎖或經 ssh），tool 結果會先扣住，直到讀得到。
 - 表單輸入是明碼顯示。
 - 只支援 macOS。
 

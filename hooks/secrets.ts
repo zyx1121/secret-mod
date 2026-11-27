@@ -101,8 +101,30 @@ function parse(src: string): { cmds: Cmd[]; subs: string[] } {
     if (cmd.length) cmds.push(cmd)
     cmd = []
   }
+  const heredocs: string[] = []
   for (let i = 0; i < src.length; i++) {
     const c = src[i]!
+    // A heredoc body is data, not commands: skip it up to its delimiter line.
+    if (c === '<' && src[i + 1] === '<' && src[i + 2] !== '<') {
+      const m = src.slice(i + 2).match(/^-?\s*(['"]?)([A-Za-z0-9_]+)\1/)
+      if (m) {
+        heredocs.push(m[2]!)
+        i += 1 + m[0].length
+        continue
+      }
+    }
+    if (c === '\n' && heredocs.length) {
+      endCmd()
+      let at = i + 1
+      for (const tag of heredocs.splice(0)) {
+        const lines = src.slice(at).split('\n')
+        const k = lines.findIndex(l => l.trim() === tag)
+        at += k < 0 ? src.length : lines.slice(0, k + 1).join('\n').length + 1
+      }
+      i = Math.min(at, src.length) - 1
+      continue
+    }
+    if (c === '$' && src[i + 1] === "'") continue
     if (c === '\\') {
       word += src[i + 1] ?? ''
       inWord = true
@@ -143,29 +165,32 @@ function parse(src: string): { cmds: Cmd[]; subs: string[] } {
   return { cmds, subs }
 }
 
-const WRAPPERS = new Set(['sudo', 'command', 'exec', 'env', 'nohup', 'time', 'nice', 'xargs'])
 const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
 const base = (w: string) => w.slice(w.lastIndexOf('/') + 1)
 
+// Judged by the words, not by the program name, so a wrapper with options
+// (`env -i`, `sudo -u x`) or a program held in a variable is still caught.
 function cmdReads(words: Cmd, depth: number): boolean {
-  let i = 0
-  while (i < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!) || WRAPPERS.has(base(words[i]!)))) i++
-  const head = base(words[i] ?? '')
-  const args = words.slice(i + 1)
-  if (SHELLS.has(head)) {
-    const c = args.findIndex(a => /^-[a-z]*c[a-z]*$/.test(a))
-    return c >= 0 && args[c + 1] !== undefined && readsKeychain(args[c + 1]!, depth + 1)
+  const flags = words.filter(a => /^-[a-zA-Z]+$/.test(a))
+  if (words.some(w => /^find-(generic|internet)-password$/.test(w)) && flags.some(f => /[wg]/.test(f))) return true
+  if (words.includes('dump-keychain') && flags.some(f => f.includes('d'))) return true
+  const at = words.findIndex(w => base(w) === 'security')
+  if (at >= 0) {
+    const args = words.slice(at + 1)
+    const sub = args.findIndex(a => !a.startsWith('-'))
+    const pre = sub < 0 ? args : args.slice(0, sub)
+    if (pre.some(a => /^-[a-z]*i/.test(a))) return true
+    if (sub >= 0 && ['export', 'interactive'].includes(args[sub]!)) return true
   }
-  if (head !== 'security') return false
-  const sub = args.findIndex(a => !a.startsWith('-'))
-  const pre = sub < 0 ? args : args.slice(0, sub)
-  if (pre.some(a => /^-[a-z]*i/.test(a))) return true
-  if (sub < 0) return false
-  const name = args[sub]!
-  const flags = args.slice(sub + 1).filter(a => /^-[a-zA-Z]+$/.test(a))
-  if (/^find-(generic|internet)-password$/.test(name)) return flags.some(f => /[wg]/.test(f))
-  if (name === 'dump-keychain') return flags.some(f => f.includes('d'))
-  return name === 'export' || name === 'interactive'
+  for (let i = 0; i < words.length; i++) {
+    if (SHELLS.has(base(words[i]!)) || base(words[i]!) === 'eval') {
+      const rest = words.slice(i + 1)
+      const c = rest.findIndex(a => /^-[a-z]*c[a-z]*$/.test(a))
+      const script = base(words[i]!) === 'eval' ? rest.join(' ') : c >= 0 ? rest[c + 1] : undefined
+      if (script !== undefined && readsKeychain(script, depth + 1)) return true
+    }
+  }
+  return false
 }
 
 export function readsKeychain(command: string, depth = 0): boolean {

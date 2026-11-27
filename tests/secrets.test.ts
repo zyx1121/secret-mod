@@ -58,6 +58,11 @@ describe('secrets', () => {
       'security -v -i',
       'X="$(security find-generic-password -s kilo/x -w)"; echo $X',
       'sudo security find-generic-password -s kilo/x -gw',
+      'env -i /usr/bin/security find-generic-password -s x -w',
+      "$'security' find-generic-password -s x -w",
+      'S=security; $S find-generic-password -s x -w',
+      'sudo -u me security find-generic-password -s x -w',
+      'eval "security find-generic-password -s x -w"',
     ]) expect(readsKeychain(c)).toBe(true)
     for (const c of [
       'security find-generic-password -s kilo/x',
@@ -67,7 +72,7 @@ describe('secrets', () => {
       'git commit -m "Fix security export bug"',
       'gh pr edit 3 --body "agents ran security find-generic-password -w in Bash"',
       'security find-generic-password -s kilo/export-key',
-      'echo security find-generic-password -w',
+      'git commit -F- <<EOF\nmention find-generic-password and -w in a message\nEOF',
     ]) expect(readsKeychain(c)).toBe(false)
   })
 })

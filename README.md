@@ -75,6 +75,7 @@ For the secret `nycu-portal`, `run` sets:
 - Masking stops the value itself, not what a command derives from it. A hash or a length still reaches Claude.
 - Outside `run`, values shorter than 8 characters are not masked, so common words stay readable.
 - A value you paste into the prompt yourself is not masked.
+- When the keychain cannot be read (locked, or over ssh), tool results are withheld until it can.
 - The form shows what you type in plain text.
 - macOS only.
 
