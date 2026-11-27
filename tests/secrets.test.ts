@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, pairValues, readsKeychain, toHex, variants } from '../hooks/secrets'
+import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, pairValues, parseItems, readsKeychain, toHex, variants } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -43,6 +43,30 @@ describe('secrets', () => {
     expect(keychainAttr('    "acct"<blob>="token"', 'acct')).toBe('token')
     expect(keychainAttr('    "icmt"<blob>=0x4F4BEFBC9B  "OK\\357\\274\\233"', 'icmt')).toBe('OK；')
     expect(keychainAttr('    "icmt"<blob>=<NULL>', 'icmt')).toBe('')
+  })
+
+  test('the keychain listing carries the account used for pair masks', async () => {
+    const dump = [
+      'keychain: "/Users/u/Library/Keychains/login.keychain-db"',
+      'version: 512',
+      'class: "genp"',
+      'attributes:',
+      '    "acct"<blob>="me@x.tw"',
+      '    "icmt"<blob>=<NULL>',
+      '    "mdat"<timedate>=0x32303236313132373030303030305A00  "20261127000000Z\\000"',
+      '    "svce"<blob>="kilo/api"',
+      'keychain: "/Users/u/Library/Keychains/login.keychain-db"',
+      'class: "genp"',
+      'attributes:',
+      '    "acct"<blob>="other"',
+      '    "svce"<blob>="unrelated"',
+      '',
+    ].join('\n')
+    const items = parseItems(dump)
+    expect(items.length).toBe(1)
+    expect(items[0]!.name).toBe('api')
+    expect(items[0]!.account).toBe('me@x.tw')
+    expect(items[0]!.modified).toBe('20261127000000Z')
   })
 
   test('variants cover base64, URL and hex', async () => {

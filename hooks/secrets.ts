@@ -44,6 +44,22 @@ export function keychainAttr(block: string, key: string): string {
   return new TextDecoder().decode(bytes)
 }
 
+export type Item = { name: string; account: string; comment: string; modified: string }
+
+// Parses `security dump-keychain` output (attributes only) into the items of this mod.
+export function parseItems(stdout: string): Item[] {
+  const items: Item[] = []
+  for (const block of stdout.split(/^keychain: /m)) {
+    if (!/^class: "genp"/m.test(block)) continue
+    const attr = (k: string) => keychainAttr(block, k)
+    const service = attr('svce')
+    if (!service.startsWith(PREFIX)) continue
+    const modified = block.match(/"mdat"<timedate>=\S*\s+"([^"\\]*)/)?.[1] ?? ''
+    items.push({ name: service.slice(PREFIX.length), account: attr('acct'), comment: attr('icmt'), modified })
+  }
+  return items.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 // Encodings a command can print a value in: raw, base64 (with and without the
 // newline `echo` adds), URL encoding and hex.
 export function variants(v: string): string[] {
