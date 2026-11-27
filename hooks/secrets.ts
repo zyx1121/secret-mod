@@ -44,6 +44,22 @@ export function keychainAttr(block: string, key: string): string {
   return new TextDecoder().decode(bytes)
 }
 
+export type Item = { name: string; account: string; comment: string; modified: string }
+
+// Parses `security dump-keychain` output (attributes only) into the items of this mod.
+export function parseItems(stdout: string): Item[] {
+  const items: Item[] = []
+  for (const block of stdout.split(/^keychain: /m)) {
+    if (!/^class: "genp"/m.test(block)) continue
+    const attr = (k: string) => keychainAttr(block, k)
+    const service = attr('svce')
+    if (!service.startsWith(PREFIX)) continue
+    const modified = block.match(/"mdat"<timedate>=\S*\s+"([^"\\]*)/)?.[1] ?? ''
+    items.push({ name: service.slice(PREFIX.length), account: attr('acct'), comment: attr('icmt'), modified })
+  }
+  return items.sort((a, b) => a.name.localeCompare(b.name))
+}
+
 // Encodings a command can print a value in: raw, base64 (with and without the
 // newline `echo` adds), URL encoding and hex.
 export function variants(v: string): string[] {
@@ -76,6 +92,20 @@ export function globalValues(name: string, value: string): string[] {
   return Object.entries(envFor(name, value, ''))
     .filter(([k, v]) => v.length >= MIN_GLOBAL && !(k.startsWith(`${p}_`) && isNonSecretField(k.slice(p.length + 1))))
     .map(([, v]) => v)
+}
+
+// HTTP Basic style pairs `<account>:<secret>` and `<fieldA>:<fieldB>` (ordered,
+// secret fields only) whose encodings a command may print. Only secrets of at
+// least `minLen` chars take part. Hashes and lengths are not covered.
+export function pairValues(name: string, value: string, account: string, minLen = 0): string[] {
+  const p = envPrefix(name)
+  const env = envFor(name, value, '')
+  const secret = Object.entries(env).filter(([k, v]) => v.length >= minLen && !(k.startsWith(`${p}_`) && isNonSecretField(k.slice(p.length + 1))))
+  const out = new Set<string>()
+  if (account) for (const [, v] of secret) out.add(`${account}:${v}`)
+  const fields = secret.filter(([k]) => k !== p)
+  for (const [a, x] of fields) for (const [b, y] of fields) if (a !== b) out.add(`${x}:${y}`)
+  return [...out]
 }
 
 // Masks every string inside a tool result; returns undefined when nothing matched.

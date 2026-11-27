@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, globalValues, keychainAttr, mask, maskDeep, metaKey, PREFIX, readsKeychain, toHex, variants } from './secrets'
+import { envFor, envPrefix, FIELD, globalValues, type Item, keychainAttr, MIN_GLOBAL, mask, maskDeep, metaKey, pairValues, parseItems, PREFIX, readsKeychain, toHex, variants } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -19,21 +19,10 @@ const text = (s: string) => ({ result: s })
 const fail = (s: string) => ({ result: s, isError: true as const })
 const quote = (s: string) => `"${s.replace(/["\\\n]/g, ' ')}"`
 
-type Item = { name: string; account: string; comment: string; modified: string }
-
 // `security dump-keychain` without -d prints attributes only, never values.
 async function listItems($: any): Promise<Item[]> {
   const { stdout } = await $.process.run(['security', 'dump-keychain'], { timeoutMs: 20_000 })
-  const items: Item[] = []
-  for (const block of stdout.split(/^keychain: /m)) {
-    if (!/^class: "genp"/m.test(block)) continue
-    const attr = (k: string) => keychainAttr(block, k)
-    const service = attr('svce')
-    if (!service.startsWith(PREFIX)) continue
-    const modified = block.match(/"mdat"<timedate>=\S*\s+"([^"\\]*)/)?.[1] ?? ''
-    items.push({ name: service.slice(PREFIX.length), account: attr('acct'), comment: attr('icmt'), modified })
-  }
-  return items.sort((a, b) => a.name.localeCompare(b.name))
+  return parseItems(stdout)
 }
 
 async function readValue($: any, name: string, timeoutMs = 30_000): Promise<string | undefined> {
@@ -70,7 +59,8 @@ async function loadKnown($: any): Promise<void> {
     }
     if (value === undefined) continue
     const set = values.get(it.name) ?? new Set<string>()
-    for (const v of globalValues(it.name, value)) for (const x of variants(v)) set.add(x)
+    // The account comes from the listing: no extra keychain call on this path.
+    for (const v of [...globalValues(it.name, value), ...pairValues(it.name, value, it.account, MIN_GLOBAL)]) for (const x of variants(v)) set.add(x)
     values.set(it.name, set)
     seen.set(it.name, it.modified)
   }
@@ -288,7 +278,8 @@ export const register: Register = on => {
       const vars = envFor(name, value, await readAccount($, name))
       Object.assign(env, vars)
       const raw = Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v)
-      masks.push({ name, values: raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])) })
+      const pairs = pairValues(name, value, vars[`${envPrefix(name)}_ACCOUNT`] ?? '', 4)
+      masks.push({ name, values: [...raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])), ...pairs.flatMap(variants)] })
     }
     if (readsKeychain(String(e.command)))
       return fail('secret-mod: do not read the keychain inside run. Pass the name in secrets and use its env var.')

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, readsKeychain, toHex, variants } from '../hooks/secrets'
+import { envFor, envPrefix, globalValues, keychainAttr, mask, maskDeep, pairValues, parseItems, readsKeychain, toHex, variants } from '../hooks/secrets'
 
 describe('secrets', () => {
   test('names map to env vars', async () => {
@@ -45,6 +45,30 @@ describe('secrets', () => {
     expect(keychainAttr('    "icmt"<blob>=<NULL>', 'icmt')).toBe('')
   })
 
+  test('the keychain listing carries the account used for pair masks', async () => {
+    const dump = [
+      'keychain: "/Users/u/Library/Keychains/login.keychain-db"',
+      'version: 512',
+      'class: "genp"',
+      'attributes:',
+      '    "acct"<blob>="me@x.tw"',
+      '    "icmt"<blob>=<NULL>',
+      '    "mdat"<timedate>=0x32303236313132373030303030305A00  "20261127000000Z\\000"',
+      '    "svce"<blob>="kilo/api"',
+      'keychain: "/Users/u/Library/Keychains/login.keychain-db"',
+      'class: "genp"',
+      'attributes:',
+      '    "acct"<blob>="other"',
+      '    "svce"<blob>="unrelated"',
+      '',
+    ].join('\n')
+    const items = parseItems(dump)
+    expect(items.length).toBe(1)
+    expect(items[0]!.name).toBe('api')
+    expect(items[0]!.account).toBe('me@x.tw')
+    expect(items[0]!.modified).toBe('20261127000000Z')
+  })
+
   test('variants cover base64, URL and hex', async () => {
     const v = variants('p@ss/word+1')
     expect(v).toContain('p@ss/word+1')
@@ -52,6 +76,24 @@ describe('secrets', () => {
     expect(v).toContain(btoa('p@ss/word+1\n').replace(/=+$/, ''))
     expect(v).toContain(encodeURIComponent('p@ss/word+1'))
     expect(v).toContain(toHex('p@ss/word+1'))
+  })
+
+  test('base64 of user:token is masked', async () => {
+    const vals = pairValues('api', 'tok-123456789', 'alice', 8).flatMap(variants)
+    const s = [{ name: 'api', values: vals }]
+    const b = btoa('alice:tok-123456789')
+    for (const enc of [b.replace(/=+$/, ''), btoa('alice:tok-123456789\n').replace(/=+$/, ''), b.replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')]) {
+      expect(mask(`Authorization: Basic ${enc}`, s)).toBe('Authorization: Basic [kilo/api]')
+      expect(maskDeep({ out: enc }, s)).toEqual({ out: '[kilo/api]' })
+    }
+  })
+
+  test('pairs of multi-field secrets use secret fields only', async () => {
+    const v = JSON.stringify({ host: 'db.internal.example', key: 'k-1234567', secret: 's-1234567' })
+    const p = pairValues('db', v, '', 8)
+    expect(p).toContain('k-1234567:s-1234567')
+    expect(p).toContain('s-1234567:k-1234567')
+    expect(p.some(x => x.includes('db.internal.example'))).toBe(false)
   })
 
   test('maskDeep masks nested strings and reports no match', async () => {
