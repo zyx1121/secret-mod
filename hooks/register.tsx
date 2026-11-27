@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, keychainAttr, mask, metaKey, PREFIX, toHex } from './secrets'
+import { envFor, envPrefix, FIELD, keychainAttr, mask, maskDeep, metaKey, MIN_GLOBAL, PREFIX, readsKeychain, toHex, variants } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -19,7 +19,7 @@ const text = (s: string) => ({ result: s })
 const fail = (s: string) => ({ result: s, isError: true as const })
 const quote = (s: string) => `"${s.replace(/["\\\n]/g, ' ')}"`
 
-type Item = { name: string; account: string; comment: string }
+type Item = { name: string; account: string; comment: string; modified: string }
 
 // `security dump-keychain` without -d prints attributes only, never values.
 async function listItems($: any): Promise<Item[]> {
@@ -30,13 +30,14 @@ async function listItems($: any): Promise<Item[]> {
     const attr = (k: string) => keychainAttr(block, k)
     const service = attr('svce')
     if (!service.startsWith(PREFIX)) continue
-    items.push({ name: service.slice(PREFIX.length), account: attr('acct'), comment: attr('icmt') })
+    const modified = block.match(/"mdat"<timedate>=\S*\s+"([^"\\]*)/)?.[1] ?? ''
+    items.push({ name: service.slice(PREFIX.length), account: attr('acct'), comment: attr('icmt'), modified })
   }
   return items.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-async function readValue($: any, name: string): Promise<string | undefined> {
-  const r = await $.process.run(['security', 'find-generic-password', '-s', PREFIX + name, '-w'])
+async function readValue($: any, name: string, timeoutMs = 30_000): Promise<string | undefined> {
+  const r = await $.process.run(['security', 'find-generic-password', '-s', PREFIX + name, '-w'], { timeoutMs })
   return r.exitCode === 0 ? r.stdout.replace(/\n$/, '') : undefined
 }
 
@@ -44,6 +45,71 @@ async function readAccount($: any, name: string): Promise<string> {
   const r = await $.process.run(['security', 'find-generic-password', '-s', PREFIX + name])
   return keychainAttr(r.stdout, 'acct')
 }
+
+// Every kilo/ value with its encodings, for masking other tools' results.
+// Values only accumulate, so a value that changed stays masked in both forms.
+// A refresh lists the keychain (one fast call) and reads only items whose
+// modification date changed; it is awaited once the cache is older than the TTL.
+const KNOWN_TTL = 15_000
+const values = new Map<string, Set<string>>()
+const seen = new Map<string, string>()
+let known: { name: string; values: string[] }[] = []
+let ready = false
+let loadedAt = 0
+let loading: Promise<void> | undefined
+
+async function loadKnown($: any): Promise<void> {
+  const items = await listItems($)
+  for (const it of items) {
+    if (seen.get(it.name) === it.modified) continue
+    let value: string | undefined
+    try {
+      value = await readValue($, it.name, 5_000)
+    } catch {
+      value = undefined
+    }
+    if (value === undefined) continue
+    const set = values.get(it.name) ?? new Set<string>()
+    for (const v of Object.values(envFor(it.name, value, ''))) if (v.length >= MIN_GLOBAL) for (const x of variants(v)) set.add(x)
+    values.set(it.name, set)
+    seen.set(it.name, it.modified)
+  }
+  known = [...values].filter(([, set]) => set.size).map(([name, set]) => ({ name, values: [...set] }))
+  ready = true
+  loadedAt = Date.now()
+}
+
+// Starts a load after any running one, so a save is never covered by a load
+// that read the keychain before it.
+function startLoad($: any): Promise<void> {
+  const prev = loading ?? Promise.resolve()
+  const p: Promise<void> = prev
+    .then(() => loadKnown($))
+    .catch(() => {})
+    .finally(() => {
+      if (loading === p) loading = undefined
+    })
+  loading = p
+  return p
+}
+
+// Resolves to true when the cache is usable: masking without it would let values through.
+async function ensureKnown($: any): Promise<boolean> {
+  if (Date.now() - loadedAt > KNOWN_TTL && !loading) startLoad($)
+  if (loading) await loading
+  return ready
+}
+
+function refreshKnown($: any): void {
+  void startLoad($)
+}
+
+const UNCHECKED = 'secret-mod could not read the keychain to check this result for secrets, so it withheld it.'
+
+const DENY =
+  'secret-mod: this command would print a keychain value into the conversation. ' +
+  'Use mcp__secret-mod__run with secrets ["<name>"] and read the value from its env var instead; ' +
+  'mcp__secret-mod__list shows the names. Reading attributes without -w or -g is fine.'
 
 async function save($: any, req: SecretRequest): Promise<string | undefined> {
   const draft = drafts[req.id] ?? {}
@@ -76,6 +142,7 @@ async function save($: any, req: SecretRequest): Promise<string | undefined> {
     updatedAt: new Date().toISOString(),
   }
   await $.store.set(metaKey(req.name), meta)
+  refreshKnown($)
   return undefined
 }
 
@@ -87,6 +154,7 @@ async function finish($: any, req: SecretRequest, message: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    refreshKnown($)
     await $.tool.register({
       name: 'ask',
       description:
@@ -190,6 +258,25 @@ export const register: Register = on => {
     return text(lines.join('\n'))
   }).catch(() => fail('secret-mod: listing the keychain failed.'))
 
+  // Wraps every tool call. Bash cannot read values out of the keychain, and a
+  // result that carries a kilo/ value, failed calls included, is masked.
+  on('tool.call', async ($, e: any, next) => {
+    if (e.tool === 'Bash' && typeof e.command === 'string' && readsKeychain(e.command)) return { deny: DENY }
+    const r: any = await next(e)
+    if (!r || r.deny !== undefined) return r
+    if (!(await ensureKnown($))) return { deny: UNCHECKED }
+    const text = typeof r.text === 'string' ? r.text : JSON.stringify(r.result ?? '')
+    const maskedText = mask(text, known)
+    const masked = maskDeep(r.result, known)
+    if (masked === undefined && maskedText === text) return r
+    // A failed call, or a hit only in the text the model reads, cannot be
+    // rebuilt as a result: withhold it and pass the masked text instead.
+    if (r.isError || masked === undefined) return { deny: maskedText }
+    return { result: masked, ...(r.context ? { context: r.context } : {}) }
+  }).catch(($: any, e: any, next: any) =>
+    next.called ? { deny: 'secret-mod could not check this result for secrets, so it withheld it.' } : next(e),
+  )
+
   on('tool.call', { tool: 'mcp__secret-mod__run' }, async ($: any, e: any) => {
     const names: string[] = Array.isArray(e.secrets) ? e.secrets.map((s: unknown) => String(s).replace(/^kilo\//, '')) : []
     const env: Record<string, string> = {}
@@ -200,19 +287,24 @@ export const register: Register = on => {
       if (value === undefined) return fail(`No keychain item ${PREFIX}${name}. Use the ask tool first.`)
       const vars = envFor(name, value, await readAccount($, name))
       Object.assign(env, vars)
-      masks.push({ name, values: Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v) })
+      const raw = Object.entries(vars).filter(([k]) => !k.endsWith('_ACCOUNT')).map(([, v]) => v)
+      masks.push({ name, values: raw.flatMap(v => (v.length >= 4 ? variants(v) : [v])) })
     }
+    if (readsKeychain(String(e.command)))
+      return fail('secret-mod: do not read the keychain inside run. Pass the name in secrets and use its env var.')
     const timeoutMs = Math.min(Math.max(Number(e.timeout_ms) || 120_000, 1_000), 600_000)
     let r
     try {
       r = await $.process.run(['/bin/zsh', '-c', String(e.command)], { env, cwd: e.cwd, timeoutMs })
     } catch (err) {
-      return fail(mask(`The command did not finish: ${String(err)}`, masks))
+      return fail(mask(mask(`The command did not finish: ${String(err)}`, masks), known))
     }
     const clip = (s: string) => (s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}\n[cut ${s.length - MAX_OUTPUT} chars]` : s)
     // Mask the streams alone, so a short value cannot eat the exit line.
-    const stdout = mask(r.stdout, masks)
-    const stderr = mask(r.stderr, masks)
+    if (!(await ensureKnown($))) return fail(UNCHECKED)
+    const all = [...masks, ...known]
+    const stdout = mask(r.stdout, all)
+    const stderr = mask(r.stderr, all)
     const out = [`exit ${r.exitCode}`, stdout && `stdout:\n${clip(stdout)}`, stderr && `stderr:\n${clip(stderr)}`]
       .filter(Boolean)
       .join('\n')
