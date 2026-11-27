@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { SecretMeta, SecretRequest } from '../types'
-import { envFor, envPrefix, FIELD, keychainAttr, mask, maskDeep, metaKey, MIN_GLOBAL, PREFIX, readsKeychain, toHex, variants } from './secrets'
+import { envFor, envPrefix, FIELD, globalValues, keychainAttr, mask, maskDeep, metaKey, PREFIX, readsKeychain, toHex, variants } from './secrets'
 
 // Values never leave this module: the model gets names, env var names and
 // masked output only.
@@ -70,7 +70,7 @@ async function loadKnown($: any): Promise<void> {
     }
     if (value === undefined) continue
     const set = values.get(it.name) ?? new Set<string>()
-    for (const v of Object.values(envFor(it.name, value, ''))) if (v.length >= MIN_GLOBAL) for (const x of variants(v)) set.add(x)
+    for (const v of globalValues(it.name, value)) for (const x of variants(v)) set.add(x)
     values.set(it.name, set)
     seen.set(it.name, it.modified)
   }
