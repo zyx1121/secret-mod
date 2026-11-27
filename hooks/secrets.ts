@@ -48,7 +48,7 @@ export function keychainAttr(block: string, key: string): string {
 // newline `echo` adds), URL encoding and hex.
 export function variants(v: string): string[] {
   const b64 = (s: string) => btoa(String.fromCharCode(...new TextEncoder().encode(s))).replace(/=+$/, '')
-  const out = new Set([v, encodeURIComponent(v), toHex(v), toHex(v).toUpperCase()])
+  const out = new Set([v, encodeURIComponent(v), toHex(v), toHex(v).toUpperCase(), JSON.stringify(v).slice(1, -1)])
   for (const s of [v, v + '\n']) {
     const b = b64(s)
     out.add(b)
@@ -81,15 +81,95 @@ export function maskDeep(value: unknown, secrets: { name: string; values: string
 
 // A shell command that prints a keychain value: `security find-*-password` with
 // -w or -g, `dump-keychain -d`, `export`, or the interactive `security -i`.
-const READ_FLAG = /(^|\s)-[a-zA-Z]*[wg][a-zA-Z]*(\s|$)/
-export function readsKeychain(command: string): boolean {
-  for (const part of command.split(/[;&|\n()`]+|\$\(/)) {
-    const m = part.match(/(?:^|[\s/"'])security\s+(.*)$/)
-    if (!m) continue
-    const args = m[1] ?? ''
-    if (/^\s*-i\b/.test(args) || /\bexport\b/.test(args)) return true
-    if (/\bfind-(generic|internet)-password\b/.test(args) && READ_FLAG.test(args)) return true
-    if (/\bdump-keychain\b/.test(args) && /(^|\s)-[a-zA-Z]*d/.test(args)) return true
+// The command is split into words with shell quoting, so quoted text such as a
+// commit message is one word and never a command.
+type Cmd = string[]
+
+function parse(src: string): { cmds: Cmd[]; subs: string[] } {
+  const cmds: Cmd[] = []
+  const subs: string[] = []
+  let cmd: Cmd = []
+  let word = ''
+  let inWord = false
+  const endWord = () => {
+    if (inWord) cmd.push(word)
+    word = ''
+    inWord = false
   }
-  return false
+  const endCmd = () => {
+    endWord()
+    if (cmd.length) cmds.push(cmd)
+    cmd = []
+  }
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i]!
+    if (c === '\\') {
+      word += src[i + 1] ?? ''
+      inWord = true
+      i++
+    } else if (c === "'") {
+      const j = src.indexOf("'", i + 1)
+      const end = j < 0 ? src.length : j
+      word += src.slice(i + 1, end)
+      inWord = true
+      i = end
+    } else if (c === '"') {
+      let j = i + 1
+      let raw = ''
+      while (j < src.length && src[j] !== '"') {
+        if (src[j] === '\\' && j + 1 < src.length) {
+          raw += src[j + 1]
+          j += 2
+        } else raw += src[j++]
+      }
+      // Command substitutions run even inside double quotes.
+      for (const m of raw.matchAll(/\$\(([^]*?)\)|`([^`]*)`/g)) subs.push(m[1] ?? m[2] ?? '')
+      word += raw
+      inWord = true
+      i = j
+    } else if (c === '$' && src[i + 1] === '(') {
+      endCmd()
+      i++
+    } else if (';&|\n()`'.includes(c)) {
+      endCmd()
+    } else if (c === ' ' || c === '\t') {
+      endWord()
+    } else {
+      word += c
+      inWord = true
+    }
+  }
+  endCmd()
+  return { cmds, subs }
+}
+
+const WRAPPERS = new Set(['sudo', 'command', 'exec', 'env', 'nohup', 'time', 'nice', 'xargs'])
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'fish'])
+const base = (w: string) => w.slice(w.lastIndexOf('/') + 1)
+
+function cmdReads(words: Cmd, depth: number): boolean {
+  let i = 0
+  while (i < words.length && (/^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]!) || WRAPPERS.has(base(words[i]!)))) i++
+  const head = base(words[i] ?? '')
+  const args = words.slice(i + 1)
+  if (SHELLS.has(head)) {
+    const c = args.findIndex(a => /^-[a-z]*c[a-z]*$/.test(a))
+    return c >= 0 && args[c + 1] !== undefined && readsKeychain(args[c + 1]!, depth + 1)
+  }
+  if (head !== 'security') return false
+  const sub = args.findIndex(a => !a.startsWith('-'))
+  const pre = sub < 0 ? args : args.slice(0, sub)
+  if (pre.some(a => /^-[a-z]*i/.test(a))) return true
+  if (sub < 0) return false
+  const name = args[sub]!
+  const flags = args.slice(sub + 1).filter(a => /^-[a-zA-Z]+$/.test(a))
+  if (/^find-(generic|internet)-password$/.test(name)) return flags.some(f => /[wg]/.test(f))
+  if (name === 'dump-keychain') return flags.some(f => f.includes('d'))
+  return name === 'export' || name === 'interactive'
+}
+
+export function readsKeychain(command: string, depth = 0): boolean {
+  if (depth > 4) return true
+  const { cmds, subs } = parse(command)
+  return cmds.some(c => cmdReads(c, depth)) || subs.some(s => readsKeychain(s, depth + 1))
 }
